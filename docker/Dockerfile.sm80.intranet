@@ -1,0 +1,84 @@
+# Intranet variant of docker/Dockerfile.sm80.
+#
+# Identical to the online build, except the vLLM base tree is unpacked from a
+# local archive (third_party/vllm-pr56201-base.tar.gz) instead of fetched from
+# GitHub. Prepare the archive on an internet-connected host with:
+#
+#   scripts/prepare_vllm_bundle.sh          # -> third_party/vllm-pr56201-base.tar.gz
+#
+# The archive contains a shallow clone of the exact base commit, so
+# scripts/apply_patches.sh's base-commit check passes unchanged.
+#
+# Requires: docker base image registry reachable, a PyPI mirror configured
+# (e.g. via build args PIP_INDEX_URL / PIP_EXTRA_INDEX_URL), and
+# https://download.pytorch.org/whl/cu130 mirrored or reachable.
+#
+# Build (intranet):
+#   docker build -f docker/Dockerfile.sm80.intranet \
+#       --build-arg PIP_INDEX_URL=https://your-mirror.example/simple \
+#       -t deepinfer-sm80:cu130 .
+ARG CUDA_VERSION=13.0.0
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# vLLM PR #56201 commit that both patches are based on.
+ARG VLLM_BASE_COMMIT=79a7108d9aea27ddab99ce1779290d300b17fc23
+# 8.0 = A100/A800, 8.6 = RTX 3090 / RTX A6000.
+ARG TORCH_CUDA_ARCH_LIST="8.0 8.6"
+# Parallel compile jobs for the vLLM extension build.
+ARG MAX_JOBS=16
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        git \
+        gcc-13 \
+        g++-13 \
+        libnuma-dev \
+        python3.12 \
+        python3.12-dev \
+        python3.12-venv \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-13 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-13 100 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.12 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:/usr/local/cuda/bin:/usr/local/nvidia/bin:$PATH
+ENV VIRTUAL_ENV=/opt/venv
+
+# Intranet PyPI mirror (plain pip defaults if unset).
+ARG PIP_INDEX_URL=""
+ARG PIP_EXTRA_INDEX_URL=""
+RUN if [ -n "$PIP_INDEX_URL" ]; then pip config set global.index-url "$PIP_INDEX_URL"; fi \
+    && if [ -n "$PIP_EXTRA_INDEX_URL" ]; then pip config set global.extra-index-url "$PIP_EXTRA_INDEX_URL"; fi
+
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir cmake ninja "setuptools-scm>=8" packaging \
+    && pip install --no-cache-dir torch==2.13.0 \
+        --index-url https://download.pytorch.org/whl/cu130
+
+# The vLLM base tree comes from a pre-built local archive (see header comment).
+# The base commit only lives on the (closed) PR #56201 ref, so the archive is
+# prepared on an internet-connected host by scripts/prepare_vllm_bundle.sh.
+COPY . /workspace/Deepinfer-SM80
+RUN tar -xzf /workspace/Deepinfer-SM80/third_party/vllm-pr56201-base.tar.gz \
+        -C /workspace \
+    && mv /workspace/vllm-pr56201-base /workspace/vllm \
+    && git -C /workspace/vllm rev-parse HEAD
+
+RUN bash /workspace/Deepinfer-SM80/scripts/apply_patches.sh --vllm-dir /workspace/vllm
+
+# Ampere-only build: the Hopper/Blackwell-only extensions (_vllm_fa3_C,
+# _flashmla_C, _deep_gemm_C, fmha_sm100, ...) are optional in setup.py and are
+# skipped when the arch list contains no sm_90a / sm_100a.
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ENV MAX_JOBS=${MAX_JOBS}
+RUN cd /workspace/vllm \
+    && pip install --no-cache-dir -r requirements/build/cuda.txt \
+    && pip install --no-cache-dir -e . --no-build-isolation
+
+WORKDIR /workspace/Deepinfer-SM80
+CMD ["python", "scripts/verify_env.py"]

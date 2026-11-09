@@ -105,6 +105,47 @@ docker build -f docker/Dockerfile.sm80 -t deepinfer-sm80:cu130 .
 docker run --rm --gpus all deepinfer-sm80:cu130
 ```
 
+### Air-gapped / intranet build
+
+`Dockerfile.sm80` fetches the vLLM base commit from GitHub during the build,
+which an intranet host cannot do. `docker/Dockerfile.sm80.intranet` is the
+same build with that one step replaced: the vLLM base tree is unpacked from a
+pre-built local archive instead of fetched.
+
+1. On an internet-connected host, prepare the archive (one-time; re-run only
+   if the base commit ever changes):
+
+   ```bash
+   scripts/prepare_vllm_bundle.sh   # -> third_party/vllm-pr56201-base.tar.gz (~82 MB)
+   ```
+
+   It fetches the exact base commit as a depth-1 clone, verifies the SHA and
+   a clean tree, and packs the archive. The original commit SHA survives, so
+   `scripts/apply_patches.sh`'s base-commit check passes unchanged.
+
+2. Move the repository (including `third_party/vllm-pr56201-base.tar.gz`)
+   into the intranet — via git (mind the 82 MB blob) or `scp`/USB.
+
+3. On the intranet host (base image registry and a PyPI mirror required):
+
+   ```bash
+   docker build -f docker/Dockerfile.sm80.intranet \
+       --build-arg PIP_INDEX_URL=https://your-mirror.example/simple \
+       -t deepinfer-sm80:cu130 .
+   docker run --rm --gpus all deepinfer-sm80:cu130
+   ```
+
+   Set `PIP_EXTRA_INDEX_URL` too if the mirror splits packages across two
+   indexes. No GitHub access is needed at any point of the build.
+
+Two network requirements remain on the intranet side: the
+`nvidia/cuda:13.0.0-devel-ubuntu24.04` base image (pullable per your setup),
+Ubuntu apt mirrors for the package install step, and — the one most likely to
+be missing — the `torch==2.13.0` cu130 wheel, which comes from
+`https://download.pytorch.org/whl/cu130`. If your PyPI mirror does not mirror
+that index, download the wheels on the outside and serve them from the mirror
+(or a local wheelhouse) before building.
+
 ## 4. Verify the environment
 
 ```bash
