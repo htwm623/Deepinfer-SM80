@@ -9,6 +9,13 @@
 # The archive contains a shallow clone of the exact base commit, so
 # scripts/apply_patches.sh's base-commit check passes unchanged.
 #
+# vLLM's CMake FetchContent also clones 9 external repos (cutlass, DeepGEMM,
+# FlashMLA, ...) during `pip install -e .` even when the arch list skips their
+# kernels. For the intranet build these are provided offline from
+# third_party/vllm-deps-src.tar.gz (prepared by scripts/prepare_deps_bundle.sh)
+# via the per-project *_SRC_DIR environment variables below, so the build
+# never touches GitHub.
+#
 # Requires: docker base image registry reachable, a PyPI mirror configured
 # (e.g. via build args PIP_INDEX_URL / PIP_EXTRA_INDEX_URL), and
 # https://download.pytorch.org/whl/cu130 mirrored or reachable.
@@ -70,6 +77,25 @@ RUN tar -xzf /workspace/Deepinfer-SM80/third_party/vllm-pr56201-base.tar.gz \
     && git -C /workspace/vllm rev-parse HEAD
 
 RUN bash /workspace/Deepinfer-SM80/scripts/apply_patches.sh --vllm-dir /workspace/vllm
+
+# Offline sources for the 9 CMake FetchContent external projects. vLLM's CMake
+# unconditionally populates these from GitHub during configure, even when the
+# Ampere-only arch list skips their kernels. Point each project's *_SRC_DIR at
+# the unpacked third_party/vllm-deps-src.tar.gz tree instead. flashkda's
+# cutlass submodule is already bundled inside the tarball.
+RUN tar -xzf /workspace/Deepinfer-SM80/third_party/vllm-deps-src.tar.gz \
+        -C /workspace \
+    && mv /workspace/vllm-deps-src /workspace/deps \
+    && ls /workspace/deps
+ENV VLLM_CUTLASS_SRC_DIR=/workspace/deps/cutlass
+ENV DEEPGEMM_SRC_DIR=/workspace/deps/deepgemm
+ENV FLASH_MLA_SRC_DIR=/workspace/deps/flashmla
+ENV FLASH_KDA_SRC_DIR=/workspace/deps/flashkda
+ENV FMHA_SM100_SRC_DIR=/workspace/deps/fmha_sm100
+ENV QUTLASS_SRC_DIR=/workspace/deps/qutlass
+ENV TML_FA4_SRC_DIR=/workspace/deps/tml_fa4
+ENV VLLM_FLASH_ATTN_SRC_DIR=/workspace/deps/flash_attn
+ENV TRITON_KERNELS_SRC_DIR=/workspace/deps/triton/python/triton_kernels/triton_kernels
 
 # Ampere-only build: the Hopper/Blackwell-only extensions (_vllm_fa3_C,
 # _flashmla_C, _deep_gemm_C, fmha_sm100, ...) are optional in setup.py and are

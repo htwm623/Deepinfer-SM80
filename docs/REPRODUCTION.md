@@ -121,22 +121,29 @@ docker run --rm --gpus all deepinfer-sm80:cu130
 
 `Dockerfile.sm80` fetches the vLLM base commit from GitHub during the build,
 which an intranet host cannot do. `docker/Dockerfile.sm80.intranet` is the
-same build with that one step replaced: the vLLM base tree is unpacked from a
-pre-built local archive instead of fetched.
+same build with that step replaced — and, since the vLLM CMake configure
+also populates 9 external repositories (cutlass, DeepGEMM, FlashMLA,
+FlashKDA, MSA, qutlass, tml-fa4, flash-attention, triton) via FetchContent
+unconditionally, with those supplied offline as well. Two archives are
+prepared on an internet-connected host and shipped with the repository:
 
-1. On an internet-connected host, prepare the archive (one-time; re-run only
-   if the base commit ever changes):
+1. On an internet-connected host, prepare both archives (one-time; re-run only
+   if the base commit or the pinned dependency versions ever change):
 
    ```bash
    scripts/prepare_vllm_bundle.sh   # -> third_party/vllm-pr56201-base.tar.gz (~82 MB)
+   scripts/prepare_deps_bundle.sh   # -> third_party/vllm-deps-src.tar.gz  (~70 MB)
    ```
 
-   It fetches the exact base commit as a depth-1 clone, verifies the SHA and
-   a clean tree, and packs the archive. The original commit SHA survives, so
-   `scripts/apply_patches.sh`'s base-commit check passes unchanged.
+   The first fetches the exact base commit as a depth-1 clone, verifies the
+   SHA and a clean tree, and packs the archive. The original commit SHA
+   survives, so `scripts/apply_patches.sh`'s base-commit check passes
+   unchanged. The second downloads the 9 pinned external dependencies as
+   source tarballs under the directory names the Dockerfile expects, wiring
+   flashkda's `cutlass` submodule to the shared pinned cutlass checkout.
 
-2. Move the repository (including `third_party/vllm-pr56201-base.tar.gz`)
-   into the intranet — via git (mind the 82 MB blob) or `scp`/USB.
+2. Move the repository (including both `third_party/*.tar.gz` files) into the
+   intranet — via git (mind the ~150 MB of blobs) or `scp`/USB.
 
 3. On the intranet host (base image registry and a PyPI mirror required):
 
@@ -147,8 +154,16 @@ pre-built local archive instead of fetched.
    docker run --rm --gpus all deepinfer-sm80:cu130
    ```
 
+   The Dockerfile unpacks the dependency sources to `/workspace/deps` and
+   points each project's `*_SRC_DIR` environment variable at them
+   (`VLLM_CUTLASS_SRC_DIR`, `DEEPGEMM_SRC_DIR`, `FLASH_MLA_SRC_DIR`,
+   `FLASH_KDA_SRC_DIR`, `FMHA_SM100_SRC_DIR`, `QUTLASS_SRC_DIR`,
+   `TML_FA4_SRC_DIR`, `VLLM_FLASH_ATTN_SRC_DIR`, `TRITON_KERNELS_SRC_DIR`),
+   so CMake FetchContent takes the local trees instead of cloning GitHub.
+
    Set `PIP_EXTRA_INDEX_URL` too if the mirror splits packages across two
-   indexes. No GitHub access is needed at any point of the build.
+   indexes. With both archives shipped, no GitHub access is needed at any
+   point of the build (the 9 CMake external dependencies included).
 
 Two network requirements remain on the intranet side: the
 `nvidia/cuda:13.0.0-devel-ubuntu24.04` base image (pullable per your setup),
