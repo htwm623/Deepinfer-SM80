@@ -7,6 +7,20 @@
 
 **DeepSeek-V4.1 kernels and 1M-context engine optimizations for NVIDIA Ampere (`SM80` / `SM86`) on vLLM V1.**
 
+> **Fork notice.** This repository is a fork of
+> [`HalfVulpes/Deepinfer-SM80`](https://github.com/HalfVulpes/Deepinfer-SM80)
+> (up to its `v0.1.1` release, commit `25e458a`). All kernels, patches,
+> benchmarks and documentation come from upstream — this fork changes none of
+> them. The only addition is commit `60403be`: an **intranet (air-gapped)
+> build path**. Upstream's build fetches the vLLM base commit from GitHub
+> (`refs/pull/56201/head`), which an offline host cannot do; this fork packs
+> the exact base tree into
+> [`third_party/vllm-pr56201-base.tar.gz`](third_party/vllm-pr56201-base.tar.gz)
+> and adds `docker/Dockerfile.sm80.intranet` +
+> `scripts/prepare_vllm_bundle.sh` so the whole build runs without GitHub
+> access. See [docs/REPRODUCTION.md](docs/REPRODUCTION.md) § "Air-gapped /
+> intranet build".
+
 DeepInfer-SM80 ports the core ideas of DeepSeek's [`DeepInfer`](https://github.com/deepseek-ai/DeepInfer), which targets Blackwell (`tcgen05`, `TMEM`, CuteDSL), to Ampere GPUs such as the A100, A800, RTX 3090 and RTX A6000. It ships as two vLLM patches plus the equivalent drop-in Python/Triton/TileLang modules.
 
 > **Fixed in v0.1.1 (`e2b585f`):** every version from the initial release (2026-10-20) up to that commit can let some layers use another index source's top-k selection on contexts longer than about 512 tokens. A before/after A/B on 8× GA100 64GB (`TP4 × PP2`, `DSpark K=5`) could not tell the two apart in long-context copy fidelity or speed, but the fix restores DeepSeek's reference behaviour, so please update. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).

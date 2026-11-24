@@ -1,5 +1,17 @@
 # Reproducing DeepInfer-SM80 on NVIDIA Ampere
 
+## Repository lineage
+
+This repository is a fork of
+[`HalfVulpes/Deepinfer-SM80`](https://github.com/HalfVulpes/Deepinfer-SM80),
+based on upstream `main` at its `v0.1.1` release (commit `25e458a`).
+Everything — kernels, vLLM patches, benchmarks, tests, docs — is upstream
+work; the fork modifies none of it. It adds exactly one commit (`60403be`)
+whose sole purpose is the **air-gapped / intranet build** described in § 3:
+the vLLM base tree is bundled as
+`third_party/vllm-pr56201-base.tar.gz` so the build never needs GitHub
+access.
+
 This document is the "install it and see it work" path that issues
 [#1](https://github.com/HalfVulpes/Deepinfer-SM80/issues/1) and
 [#2](https://github.com/HalfVulpes/Deepinfer-SM80/issues/2) were missing.
